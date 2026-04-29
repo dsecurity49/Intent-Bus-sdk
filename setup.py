@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="intent-bus",
-    version="1.0.0",
+    version="1.0.1",
     description="Python SDK for Intent Bus — a dead-simple distributed job bus",
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",

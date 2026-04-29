@@ -1,9 +1,7 @@
 from intent_bus import IntentClient
 
-bus = IntentClient(
-    host="https://dsecurity.pythonanywhere.com",
-    api_key="your_key_here"
-)
+# Host and Auth automatically resolve. Absolute zero friction.
+bus = IntentClient()
 
 result = bus.publish(
     goal="send_notification",

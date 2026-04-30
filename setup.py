@@ -8,6 +8,10 @@ setup(
     long_description_content_type="text/markdown",
     author="dsecurity49",
     url="https://github.com/dsecurity49/Intent-Bus",
+    project_urls={
+        "Source": "https://github.com/dsecurity49/intent-bus-sdk",
+        "Main Project": "https://github.com/dsecurity49/Intent-Bus",
+    },
     packages=find_packages(),
     install_requires=["requests>=2.28.0"],
     python_requires=">=3.7",

@@ -1,3 +1,4 @@
+from .version import __version__
 from .client import IntentClient
 from .exceptions import IntentBusError, IntentBusAuthError, IntentBusRateLimitError
 
@@ -6,4 +7,5 @@ __all__ = [
     "IntentBusError",
     "IntentBusAuthError",
     "IntentBusRateLimitError",
+    "__version__",
 ]

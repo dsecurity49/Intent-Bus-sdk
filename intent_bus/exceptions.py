@@ -11,3 +11,4 @@ class IntentBusAuthError(IntentBusError):
 class IntentBusRateLimitError(IntentBusError):
     """Raised when rate limit is exceeded."""
     pass
+    

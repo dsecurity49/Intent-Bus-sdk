@@ -9,19 +9,21 @@ from typing import Any, Dict, Optional
 from urllib.parse import urlencode
 
 import requests
+from requests.adapters import HTTPAdapter
 
+from .version import __version__
 from .exceptions import IntentBusError, IntentBusAuthError, IntentBusRateLimitError
 
 
 class IntentClient:
     def __init__(
         self,
-        host: str = "https://dsecurity.pythonanywhere.com",
+        base_url: str = "https://dsecurity.pythonanywhere.com",
         api_key: Optional[str] = None,
-        timeout: float = 10.0,
-        user_agent: str = "intent-bus-sdk/1.0.2",
+        timeout: float = 10.0,  # Network socket timeout, NOT the polling interval
+        user_agent: str = f"intent-bus-sdk/{__version__}",
     ):
-        self.host = host.rstrip("/")
+        self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.user_agent = user_agent
 
@@ -46,7 +48,12 @@ class IntentClient:
             raise IntentBusAuthError("Empty API key.")
 
         self.api_key = key
+        
+        # Connection Pooling for high-throughput concurrency
         self.session = requests.Session()
+        adapter = HTTPAdapter(pool_connections=10, pool_maxsize=10)
+        self.session.mount("http://", adapter)
+        self.session.mount("https://", adapter)
 
     def _build_path(self, endpoint: str, params: Optional[Dict[str, Any]]) -> str:
         if not params:
@@ -63,12 +70,15 @@ class IntentClient:
     def _canonical_body(self, json_data: Optional[Dict[str, Any]]) -> bytes:
         if json_data is None:
             return b""
-        return json.dumps(
-            json_data,
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=False,
-        ).encode("utf-8")
+        try:
+            return json.dumps(
+                json_data,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+            ).encode("utf-8")
+        except TypeError as e:
+            raise IntentBusError(f"Payload serialization failed: {e}") from e
 
     def _generate_signature(self, method: str, path: str, ts: str, nonce: str, body_bytes: bytes) -> str:
         msg = b"\n".join([
@@ -116,7 +126,7 @@ class IntentClient:
         idempotency_key: Optional[str] = None,
     ) -> requests.Response:
         path = self._build_path(endpoint, params)
-        url = f"{self.host}{path}"
+        url = f"{self.base_url}{path}"
         body_bytes = self._canonical_body(json_data)
 
         last_exc: Optional[Exception] = None

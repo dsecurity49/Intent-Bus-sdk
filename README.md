@@ -5,6 +5,11 @@
 
 The official Python client for **Intent Bus**, the reference implementation of the **Intent Protocol**.
 
+> **Looking for the server?**
+> This repository contains only the Python SDK.  
+> To self-host the bus or view the protocol source, see the main project:  
+> [https://github.com/dsecurity49/Intent-Bus](https://github.com/dsecurity49/Intent-Bus)
+
 ---
 
 ## 🚀 What is Intent Bus?
@@ -59,17 +64,17 @@ bus.listen(goal="test", handler=handler)
 By default, intents are private to your API key. v1.2.0 introduces **Hybrid Routing** for public tasks.
 
 ```python
-# Standard Private Intent
+# Standard Private Intent (Private Fleet)
 result = bus.publish(
     goal="notify",
     payload={"message": "System backup complete."}
 )
 
 # Public Intent (Open Fleet)
-# WARNING: Broadcast to all workers. Treat as public internet data.
+# WARNING: Public intents are broadcast to all workers and must be treated as public internet data.
 bus.publish(
     goal="resize_image",
-    payload={"url": "[https://img.com/cat.jpg](https://img.com/cat.jpg)"},
+    payload={"url": "https://img.com/cat.jpg"},
     visibility="public"
 )
 ```
@@ -78,14 +83,14 @@ bus.publish(
 
 ## 📥 2. Listening for Intents (Worker)
 
-Workers poll the bus for work. The `handler` determines the job's final state.
+Workers poll the bus for work. The `handler` determines the job's final state via its return value.
 
 ```python
 def handle_notification(payload):
     if not payload.get("message"):
-        return False # Explicit failure
+        return False # Explicit failure reported to bus
     print(f"Received: {payload['message']}")
-    return True # Fulfillment
+    return True # Fulfillment reported to bus
 
 # Start the blocking poll loop
 bus.listen(goal="notify", handler=handle_notification)
@@ -119,7 +124,7 @@ bus = IntentClient(
 ```
 
 ### Strict Idempotency
-To prevent double-execution under **at-least-once semantics**, pass a unique key.
+To prevent double-execution under **at-least-once delivery semantics**, pass a unique key.
 ```python
 bus.publish(
     goal="charge_user",
@@ -146,7 +151,7 @@ bus.publish(
 ## ❗ Failure Model & Reliability
 
 * **Worker Crashes:** If a worker crashes mid-execution, the intent remains "claimed" until the visibility timeout expires, after which it returns to the queue.
-* **Network Timeouts:** Timeouts during `fulfill` can lead to duplicate executions. Consumers **must** handle this via idempotent logic.
+* **Network Timeouts:** Timeouts during `fulfill` can lead to duplicate executions. Consumers **must** handle this via local state or idempotent logic.
 * **Dead Letters:** Jobs that fail repeatedly are marked as `failed`. Use a separate monitor worker to track the `/logs` endpoint.
 
 ---
@@ -158,7 +163,12 @@ Setting `visibility="public"` broadcasts your payload to the Open Fleet.
 * **NEVER** include passwords, tokens, or private PII.
 * **ALWAYS** assume the worker executing a public job is an untrusted third party.
 
-### 🛡️ Request Integrity
+### 🛡️ Worker Best Practices
+* **Defensive Parsing:** Always validate `payload` structure before processing.
+* **Non-Interactive:** Prefer whitelisting commands over executing raw strings.
+* **Isolation:** Treat all payloads as untrusted data, especially in Open Fleet mode.
+
+### 🔐 Request Integrity
 The SDK uses **HMAC-SHA256** signatures for all requests, providing:
 * **Authentication:** Verification of API key ownership.
 * **Integrity:** Protection against tampering of paths and payloads.
@@ -190,7 +200,7 @@ from intent_bus import (
 try:
     bus.publish("goal", {"data": 1})
 except IntentBusAuthError:
-    # Handle bad credentials
+    # Handle bad credentials or signature failure
 except IntentBusRateLimitError:
     # Handle 429 Too Many Requests
 ```

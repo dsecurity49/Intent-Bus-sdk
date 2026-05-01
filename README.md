@@ -3,27 +3,21 @@
 [![PyPI version](https://img.shields.io/pypi/v/intent-bus.svg)](https://pypi.org/project/intent-bus/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-The official Python client for the **Intent Protocol**.
-
-> **Looking for the server?** > This repository contains only the Python SDK.  
-> To self-host the bus, see the main project:  
-> [https://github.com/dsecurity49/Intent-Bus](https://github.com/dsecurity49/Intent-Bus)
+The official Python client for **Intent Bus**, the reference implementation of the **Intent Protocol**.
 
 ---
 
 ## 🚀 What is Intent Bus?
 
-Intent Bus is a lightweight, decentralized job execution protocol designed for backend automation and distributed architecture.
+Intent Bus is a lightweight, decentralized job execution protocol designed for backend automation and distributed architecture. It allows you to dispatch "intents" (tasks) from one machine and have them executed by workers on any other machine without managing a complex message broker.
 
-* **Publish tasks from anywhere**
-* **Execute them on any machine**
-* **No external queues required** (Perfect for self-hosted or single-node deployments)
+⚠️ **Delivery Guarantee:** **At-least-once execution.** Due to the nature of distributed polling, duplicate executions are possible. Workers **MUST** be idempotent.
 
-### 🛠️ SDK Features
-* **Secure Auth:** Request signing via HMAC-SHA256 (Strict Mode).
-* **Resilience:** Automatic retries for safe, idempotent operations.
-* **Zero-Config:** Automatic discovery of API keys from environment or local files.
-* **Hybrid Routing:** Support for both private and public "Open Fleet" intents.
+### 🧠 Design Principles
+* **Protocol First:** The SDK is a convenience wrapper; the core protocol is pure HTTP/JSON.
+* **Zero-Ops:** Designed for instant deployment without managing RabbitMQ, Redis, or Kafka.
+* **Stateless Workers:** Workers do not need to maintain local state between jobs.
+* **Explicit Failure:** No silent drops; jobs are explicitly fulfilled, failed, or timed out.
 
 ---
 
@@ -35,53 +29,65 @@ pip install intent-bus
 
 ---
 
-## 🔐 Zero-Config Authentication
+## 🔐 Automatic Credential Resolution
 
-The SDK automatically resolves your API key in this priority order:
-
-1.  Explicit `api_key` argument in the constructor.
-2.  `INTENT_API_KEY` environment variable.
-3.  Local file: `~/.apikey`
-
-**Quick Setup:**
-```bash
-echo "your_api_key_here" > ~/.apikey
-chmod 600 ~/.apikey
-```
+The SDK resolves your API key automatically using the following priority:
+1.  **Constructor:** `IntentClient(api_key="...")`
+2.  **Environment:** `export INTENT_API_KEY="..."`
+3.  **Local File:** `~/.apikey` (Must be restricted: `chmod 600 ~/.apikey`)
 
 ---
 
 ## ⚡ Quickstart
 
+### 📥 The Minimal Worker
 ```python
 from intent_bus import IntentClient
 
-# Host and Auth automatically resolve. Absolute zero friction.
 bus = IntentClient()
+
+def handler(payload):
+    print("Received Job:", payload)
+
+bus.listen(goal="test", handler=handler)
 ```
 
 ---
 
 ## 📤 1. Publishing an Intent (Producer)
 
+By default, intents are private to your API key. v1.2.0 introduces **Hybrid Routing** for public tasks.
+
 ```python
+# Standard Private Intent
 result = bus.publish(
     goal="notify",
     payload={"message": "System backup complete."}
 )
 
-print(f"Dispatched Intent ID: {result['id']}")
+# Public Intent (Open Fleet)
+# WARNING: Broadcast to all workers. Treat as public internet data.
+bus.publish(
+    goal="resize_image",
+    payload={"url": "[https://img.com/cat.jpg](https://img.com/cat.jpg)"},
+    visibility="public"
+)
 ```
 
 ---
 
 ## 📥 2. Listening for Intents (Worker)
 
+Workers poll the bus for work. The `handler` determines the job's final state.
+
 ```python
 def handle_notification(payload):
+    if not payload.get("message"):
+        return False # Explicit failure
     print(f"Received: {payload['message']}")
+    return True # Fulfillment
 
-# Blocking loop that polls the bus for work
+# Start the blocking poll loop
 bus.listen(goal="notify", handler=handle_notification)
 ```
 
@@ -89,55 +95,105 @@ bus.listen(goal="notify", handler=handle_notification)
 
 ## 🗃️ 3. Ephemeral Key-Value Store
 
-```python
-# Store data with an optional TTL (seconds)
-bus.set("last_sync_time", "1682800000", ttl=600)
+Used for sharing temporary state or configuration between distributed workers.
 
-# Retrieve data
-timestamp = bus.get("last_sync_time")
+```python
+# Set with a 10-minute expiry (600s)
+bus.set("node_01_status", "active", ttl=600)
+
+# Retrieve
+status = bus.get("node_01_status")
 ```
 
 ---
 
-## 🔁 Retry & Safety Behavior
+## ⚙️ Advanced Usage
 
-| Operation | Retries | Safe? |
+### Custom Hosts (Self-Hosting)
+```python
+bus = IntentClient(
+    base_url="https://your-private-bus.com",
+    api_key="your_key",
+    timeout=15.0
+)
+```
+
+### Strict Idempotency
+To prevent double-execution under **at-least-once semantics**, pass a unique key.
+```python
+bus.publish(
+    goal="charge_user",
+    payload={"amount": 50},
+    idempotency_key="tx_order_9982"
+)
+```
+
+---
+
+## 🔁 Operation Safety Table
+
+| Operation | SDK Retries | Protocol Safety |
 | :--- | :--- | :--- |
-| `publish` | ✅ Yes | Yes (Idempotent) |
-| `set` | ✅ Yes | Yes (Idempotent) |
-| `get` | ✅ Yes | Yes |
-| `claim` | ❌ No | No (State-changing poll) |
-| `fulfill` | ❌ No | No (State-changing) |
-| `fail` | ❌ No | No (State-changing) |
+| `publish` | ✅ Yes | Idempotent via `idempotency_key` |
+| `set` | ✅ Yes | Idempotent via `idempotency_key` |
+| `get` | ✅ Yes | Safe (Read-only) |
+| `claim` | ❌ No | State-changing; Non-idempotent |
+| `fulfill` | ❌ No | State-changing; Non-idempotent |
+| `fail` | ❌ No | State-changing; Non-idempotent |
 
 ---
 
-## 🔒 Security Model
+## ❗ Failure Model & Reliability
 
-The SDK uses **Strict Authentication** via HMAC-SHA256 to ensure:
-* **Replay Protection:** Unique nonces and timestamps.
-* **Request Integrity:** Signed paths and bodies.
-* **Identity Verification:** Cryptographic proof of API key ownership.
-
----
-
-## ⚠️ Security Warning: Public Intents
-
-If you set `visibility="public"`, **any worker on the Open Fleet can claim and read your payload.**
-
-**Never include sensitive data in public intents:**
-* ❌ API Keys / Passwords
-* ❌ Personally Identifiable Information (PII)
-* ❌ Private infrastructure details
+* **Worker Crashes:** If a worker crashes mid-execution, the intent remains "claimed" until the visibility timeout expires, after which it returns to the queue.
+* **Network Timeouts:** Timeouts during `fulfill` can lead to duplicate executions. Consumers **must** handle this via idempotent logic.
+* **Dead Letters:** Jobs that fail repeatedly are marked as `failed`. Use a separate monitor worker to track the `/logs` endpoint.
 
 ---
 
-## 🧠 Design Principles
+## 🔒 Security Guidelines
 
-* **Protocol First:** The SDK is just a wrapper; the protocol is pure HTTP/JSON.
-* **Zero-Ops:** Deploy a bus and a worker in seconds.
-* **At-Least-Once Delivery:** Workers are expected to be idempotent.
-* **Stateless Execution:** Workers don't need to maintain local state between jobs.
+### ⚠️ Public Intent Warning
+Setting `visibility="public"` broadcasts your payload to the Open Fleet.
+* **NEVER** include passwords, tokens, or private PII.
+* **ALWAYS** assume the worker executing a public job is an untrusted third party.
+
+### 🛡️ Request Integrity
+The SDK uses **HMAC-SHA256** signatures for all requests, providing:
+* **Authentication:** Verification of API key ownership.
+* **Integrity:** Protection against tampering of paths and payloads.
+* **Replay Protection:** Unique nonces and timestamps per request.
+
+---
+
+## 🌐 Raw HTTP Example (Protocol First)
+
+You don't need the SDK to use the Intent Protocol.
+```bash
+curl -X POST https://dsecurity.pythonanywhere.com/intent \
+  -H "X-API-KEY: your_key" \
+  -H "Content-Type: application/json" \
+  -d '{"goal":"test","payload":{"msg":"hello"}}'
+```
+
+---
+
+## ❗ Error Handling
+
+```python
+from intent_bus import (
+    IntentBusError,
+    IntentBusAuthError,
+    IntentBusRateLimitError
+)
+
+try:
+    bus.publish("goal", {"data": 1})
+except IntentBusAuthError:
+    # Handle bad credentials
+except IntentBusRateLimitError:
+    # Handle 429 Too Many Requests
+```
 
 ---
 

@@ -152,7 +152,7 @@ bus.publish(
 
 * **Worker Crashes:** If a worker crashes mid-execution, the intent remains "claimed" until the visibility timeout expires, after which it returns to the queue.
 * **Network Timeouts:** Timeouts during `fulfill` can lead to duplicate executions. Consumers **must** handle this via local state or idempotent logic.
-* **Dead Letters:** Jobs that fail repeatedly are marked as `failed`. Use a separate monitor worker to track the `/logs` endpoint.
+* **Dead Letters:** Jobs that fail repeatedly are marked as failed. Use the Admin Dashboard (/admin/dashboard) to monitor dead letters and investigate failures.
 
 ---
 

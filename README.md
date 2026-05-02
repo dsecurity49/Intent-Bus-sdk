@@ -1,4 +1,4 @@
-# Intent Bus SDK 🚌
+# Intent Bus SDK 
 
 [![PyPI version](https://img.shields.io/pypi/v/intent-bus.svg)](https://pypi.org/project/intent-bus/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -12,13 +12,13 @@ The official Python client for **Intent Bus**, the reference implementation of t
 
 ---
 
-## 🚀 What is Intent Bus?
+##  What is Intent Bus?
 
 Intent Bus is a lightweight, decentralized job execution protocol designed for backend automation and distributed architecture. It allows you to dispatch "intents" (tasks) from one machine and have them executed by workers on any other machine without managing a complex message broker.
 
-⚠️ **Delivery Guarantee:** **At-least-once execution.** Due to the nature of distributed polling, duplicate executions are possible. Workers **MUST** be idempotent.
+ **Delivery Guarantee:** **At-least-once execution.** Due to the nature of distributed polling, duplicate executions are possible. Workers **MUST** be idempotent.
 
-### 🧠 Design Principles
+###  Design Principles
 * **Protocol First:** The SDK is a convenience wrapper; the core protocol is pure HTTP/JSON.
 * **Zero-Ops:** Designed for instant deployment without managing RabbitMQ, Redis, or Kafka.
 * **Stateless Workers:** Workers do not need to maintain local state between jobs.
@@ -26,7 +26,7 @@ Intent Bus is a lightweight, decentralized job execution protocol designed for b
 
 ---
 
-## 📦 Installation
+##  Installation
 
 ```bash
 pip install intent-bus
@@ -43,9 +43,9 @@ The SDK resolves your API key automatically using the following priority:
 
 ---
 
-## ⚡ Quickstart
+##  Quickstart
 
-### 📥 The Minimal Worker
+###  The Minimal Worker
 ```python
 from intent_bus import IntentClient
 
@@ -59,7 +59,7 @@ bus.listen(goal="test", handler=handler)
 
 ---
 
-## 📤 1. Publishing an Intent (Producer)
+##  1. Publishing an Intent (Producer)
 
 By default, intents are private to your API key. v1.2.0 introduces **Hybrid Routing** for public tasks.
 
@@ -81,7 +81,7 @@ bus.publish(
 
 ---
 
-## 📥 2. Listening for Intents (Worker)
+##  2. Listening for Intents (Worker)
 
 Workers poll the bus for work. The `handler` determines the job's final state via its return value.
 
@@ -98,7 +98,7 @@ bus.listen(goal="notify", handler=handle_notification)
 
 ---
 
-## 🗃️ 3. Ephemeral Key-Value Store
+##  3. Ephemeral Key-Value Store
 
 Used for sharing temporary state or configuration between distributed workers.
 
@@ -112,7 +112,7 @@ status = bus.get("node_01_status")
 
 ---
 
-## ⚙️ Advanced Usage
+##  Advanced Usage
 
 ### Custom Hosts (Self-Hosting)
 ```python
@@ -135,7 +135,7 @@ bus.publish(
 
 ---
 
-## 🔁 Operation Safety Table
+##  Operation Safety Table
 
 | Operation | SDK Retries | Protocol Safety |
 | :--- | :--- | :--- |
@@ -148,7 +148,7 @@ bus.publish(
 
 ---
 
-## ❗ Failure Model & Reliability
+##  Failure Model & Reliability
 
 * **Worker Crashes:** If a worker crashes mid-execution, the intent remains "claimed" until the visibility timeout expires, after which it returns to the queue.
 * **Network Timeouts:** Timeouts during `fulfill` can lead to duplicate executions. Consumers **must** handle this via local state or idempotent logic.
@@ -163,12 +163,12 @@ Setting `visibility="public"` broadcasts your payload to the Open Fleet.
 * **NEVER** include passwords, tokens, or private PII.
 * **ALWAYS** assume the worker executing a public job is an untrusted third party.
 
-### 🛡️ Worker Best Practices
+###  Worker Best Practices
 * **Defensive Parsing:** Always validate `payload` structure before processing.
 * **Non-Interactive:** Prefer whitelisting commands over executing raw strings.
 * **Isolation:** Treat all payloads as untrusted data, especially in Open Fleet mode.
 
-### 🔐 Request Integrity
+###  Request Integrity
 The SDK uses **HMAC-SHA256** signatures for all requests, providing:
 * **Authentication:** Verification of API key ownership.
 * **Integrity:** Protection against tampering of paths and payloads.
@@ -176,7 +176,7 @@ The SDK uses **HMAC-SHA256** signatures for all requests, providing:
 
 ---
 
-## 🌐 Raw HTTP Example (Protocol First)
+##  Raw HTTP Example (Protocol First)
 
 You don't need the SDK to use the Intent Protocol.
 ```bash
@@ -207,6 +207,6 @@ except IntentBusRateLimitError:
 
 ---
 
-## 📜 License
+##  License
 
 MIT License © 2026 Dsecurity

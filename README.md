@@ -10,7 +10,7 @@ The official Python client for **Intent Bus**, the reference implementation of t
 > **Looking for the server?**
 > This repository contains only the Python SDK.  
 > To self-host the bus or view the protocol source, see the main project:  
-> [https://github.com/dsecurity49/Intent-Bus](https://github.com/dsecurity49/Intent-Bus)
+> [Intent Bus](https://github.com/dsecurity49/Intent-Bus)
 
 ---
 

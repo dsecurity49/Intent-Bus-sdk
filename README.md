@@ -4,7 +4,7 @@
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-The official Python SDK for **Intent Bus**, a lightweight distributed job bus implementing the **Intent Protocol v7.5**.
+The official Python SDK for **Intent Bus**, a lightweight distributed job bus implementing the **Intent Protocol v2.0**.
 
 > **Looking for the server?**  
 > This repository contains the Python SDK and Worker Runtime.  

@@ -7,7 +7,7 @@ import random
 import secrets
 import stat
 import time
-from typing import Any, Dict, Optional, Callable
+from typing import Any, Callable, Dict, Optional
 from urllib.parse import quote
 
 import requests
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 class ClaimResponse(dict):
     """
     Hybrid response object: Behaves like a dictionary for backward compatibility,
-    but carries v7.5 protocol metadata as attributes.
+    but carries Protocol v2.0 metadata as attributes.
     """
     def __init__(self, seq=None, status_code: int = 200, retry_after: Optional[float] = None, **kwargs):
         super().__init__(seq or {}, **kwargs)
@@ -93,9 +93,12 @@ class IntentClient:
     def _canonical_body(self, json_data: Optional[Dict[str, Any]]) -> bytes:
         if json_data is None:
             return b""
-        return json.dumps(
-            json_data, sort_keys=True, separators=(",", ":"), ensure_ascii=False
-        ).encode("utf-8")
+        try:
+            return json.dumps(
+                json_data, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+            ).encode("utf-8")
+        except (TypeError, ValueError) as e:
+            raise IntentBusError(f"Payload serialization failed: {e}")
 
     def _generate_signature(self, method: str, path: str, ts: str, nonce: str, body_bytes: bytes) -> str:
         msg = b"\n".join([
@@ -224,7 +227,9 @@ class IntentClient:
                     continue
                 try:
                     result = handler(job.get("payload", {}))
-                    if result is not False:
+                    if result is False:
+                        self.fail(job["id"], "Worker handler returned False")
+                    else:
                         self.fulfill(job["id"], **(result if isinstance(result, dict) else {}))
                 except Exception as e:
                     self.fail(job["id"], str(e))

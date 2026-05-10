@@ -1,34 +1,78 @@
-# Intent Bus SDK 
+# Intent Bus SDK
 
 [![PyPI version](https://badge.fury.io/py/intent-bus.svg)](https://badge.fury.io/py/intent-bus)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
+The official Python SDK for **Intent Bus**, a lightweight distributed job bus implementing the **Intent Protocol v7.5**.
 
-The official Python client for **Intent Bus**, the reference implementation of the **Intent Protocol**.
-
-> **Looking for the server?**
-> This repository contains only the Python SDK.  
-> To self-host the bus or view the protocol source, see the main project:  
-> [Intent Bus](https://github.com/dsecurity49/Intent-Bus)
+> **Looking for the server?**  
+> This repository contains the Python SDK and Worker Runtime.  
+> Protocol server implementation: https://github.com/dsecurity49/Intent-Bus
 
 ---
 
-##  What is Intent Bus?
+##  Quickstart (30 seconds)
 
-Intent Bus is a lightweight, decentralized job execution protocol designed for backend automation and distributed architecture. It allows you to dispatch "intents" (tasks) from one machine and have them executed by workers on any other machine without managing a complex message broker.
+### 1. Install
+```bash
+pip install intent-bus
+```
 
- **Delivery Guarantee:** **At-least-once execution.** Due to the nature of distributed polling, duplicate executions are possible. Workers **MUST** be idempotent.
+### 2. Publish an intent
+```python
+from intent_bus import IntentClient
 
-###  Design Principles
-* **Protocol First:** The SDK is a convenience wrapper; the core protocol is pure HTTP/JSON.
-* **Zero-Ops:** Designed for instant deployment without managing RabbitMQ, Redis, or Kafka.
-* **Stateless Workers:** Workers do not need to maintain local state between jobs.
-* **Explicit Failure:** No silent drops; jobs are explicitly fulfilled, failed, or timed out.
+bus = IntentClient()
+
+bus.publish(
+    goal="notify",
+    payload={"message": "Hello World"},
+    namespace="default"
+)
+```
+
+### 3. Run a worker
+```python
+from intent_bus import IntentClient
+
+bus = IntentClient()
+
+def handler(payload):
+    print("Received:", payload)
+    return {"status": "done"}
+
+bus.listen(
+    goal="notify",
+    handler=handler,
+    namespace="default"
+)
+```
+
+Done. You now have a working distributed job pipeline.
 
 ---
 
-##  Installation
+## Versioning Model
+
+- **SDK Version:** `v1.3.0`
+- **Protocol Version:** `Intent Protocol v7.5`
+
+The SDK evolves independently while maintaining compatibility with the stable protocol specification.
+
+---
+
+## New in SDK v1.3.0 (Protocol v7.5 Support)
+
+- First-Class CLI – Run workers and publish intents directly from the terminal
+- Namespace Routing – Isolated execution domains for intents
+- Structured Fulfillment – Workers can return structured metadata
+- Reliable Claim Model – Safe at-least-once execution with retry awareness
+- Server-driven Backoff – Respects Retry-After headers for idle scaling
+
+---
+
+## Installation
 
 ```bash
 pip install intent-bus
@@ -36,179 +80,239 @@ pip install intent-bus
 
 ---
 
-## 🔐 Automatic Credential Resolution
+## Command Line Interface (CLI)
 
-The SDK resolves your API key automatically using the following priority:
-1.  **Constructor:** `IntentClient(api_key="...")`
-2.  **Environment:** `export INTENT_API_KEY="..."`
-3.  **Local File:** `~/.apikey` (Must be restricted: `chmod 600 ~/.apikey`)
+The SDK includes a production-ready CLI for both workers and publishers.
+
+### Start a worker node
+
+```bash
+intent-bus listen notify --namespace prod --worker-id worker-01
+```
+
+### With capabilities
+
+```bash
+intent-bus listen notify \
+  --namespace prod \
+  --worker-id worker-01 \
+  --capabilities python,notify
+```
+
+### Publish an intent
+
+```bash
+intent-bus publish notify '{"message": "Hello World"}' --namespace prod
+```
+
+### Publish publicly
+
+```bash
+intent-bus publish notify '{"message": "Hello World"}' --namespace prod --public
+```
+
+> WARNING: Always wrap JSON payloads in single quotes in shells (Termux/Linux especially).
 
 ---
 
-##  Quickstart
+## Automatic Credential Resolution
 
-###  The Minimal Worker
+1. Constructor:
+   ```python
+   IntentClient(api_key="...")
+   ```
+2. Environment:
+   ```bash
+   export INTENT_API_KEY="..."
+   ```
+3. Local file:
+   ```
+   ~/.apikey (chmod 600 required)
+   ```
+
+---
+
+## SDK Usage
+
+### Worker (Consumer)
+
 ```python
 from intent_bus import IntentClient
 
 bus = IntentClient()
 
-def handler(payload):
-    print("Received Job:", payload)
+def handle_task(payload):
+    print(f"Processing: {payload}")
 
-bus.listen(goal="test", handler=handler)
-```
+    return {
+        "status": "success",
+        "processed_by": "worker-01"
+    }
 
----
-
-##  1. Publishing an Intent (Producer)
-
-By default, intents are private to your API key. v1.2.0 introduces **Hybrid Routing** for public tasks.
-
-```python
-# Standard Private Intent (Private Fleet)
-result = bus.publish(
-    goal="notify",
-    payload={"message": "System backup complete."}
-)
-
-# Public Intent (Open Fleet)
-# WARNING: Public intents are broadcast to all workers and must be treated as public internet data.
-bus.publish(
-    goal="resize_image",
-    payload={"url": "https://img.com/cat.jpg"},
-    visibility="public"
+bus.listen(
+    goal="video_render",
+    handler=handle_task,
+    namespace="heavy-tasks",
+    capabilities="gpu,ffmpeg"
 )
 ```
 
 ---
 
-##  2. Listening for Intents (Worker)
+### Handler Semantics
 
-Workers poll the bus for work. The `handler` determines the job's final state via its return value.
-
-```python
-def handle_notification(payload):
-    if not payload.get("message"):
-        return False # Explicit failure reported to bus
-    print(f"Received: {payload['message']}")
-    return True # Fulfillment reported to bus
-
-# Start the blocking poll loop
-bus.listen(goal="notify", handler=handle_notification)
-```
+| Return Value | Meaning |
+|------|--------|
+| dict | Structured fulfill payload |
+| True / None | Default fulfillment |
+| False | Mark job as failed |
 
 ---
 
-##  3. Ephemeral Key-Value Store
+### Publisher (Producer)
 
-Used for sharing temporary state or configuration between distributed workers.
-
-```python
-# Set with a 10-minute expiry (600s)
-bus.set("node_01_status", "active", ttl=600)
-
-# Retrieve
-status = bus.get("node_01_status")
-```
-
----
-
-##  Advanced Usage
-
-### Custom Hosts (Self-Hosting)
-```python
-bus = IntentClient(
-    base_url="https://your-private-bus.com",
-    api_key="your_key",
-    timeout=15.0
-)
-```
-
-### Strict Idempotency
-To prevent double-execution under **at-least-once delivery semantics**, pass a unique key.
 ```python
 bus.publish(
-    goal="charge_user",
-    payload={"amount": 50},
-    idempotency_key="tx_order_9982"
+    goal="video_render",
+    payload={"id": 101, "format": "mp4"},
+    namespace="heavy-tasks",
+    visibility="private"
 )
 ```
 
 ---
 
-##  Operation Safety Table
+## CLI Worker Behavior
 
-| Operation | SDK Retries | Protocol Safety |
-| :--- | :--- | :--- |
-| `publish` | ✅ Yes | Idempotent via `idempotency_key` |
-| `set` | ✅ Yes | Idempotent via `idempotency_key` |
-| `get` | ✅ Yes | Safe (Read-only) |
-| `claim` | ❌ No | State-changing; Non-idempotent |
-| `fulfill` | ❌ No | State-changing; Non-idempotent |
-| `fail` | ❌ No | State-changing; Non-idempotent |
+- Workers poll continuously for jobs
+- Server controls idle backoff via Retry-After
+- At-least-once delivery model
+- Workers must be idempotent
 
 ---
 
-##  Failure Model & Reliability
+## Core Concepts
 
-* **Worker Crashes:** If a worker crashes mid-execution, the intent remains "claimed" until the visibility timeout expires, after which it returns to the queue.
-* **Network Timeouts:** Timeouts during `fulfill` can lead to duplicate executions. Consumers **must** handle this via local state or idempotent logic.
-* **Dead Letters:** Jobs that fail repeatedly are marked as failed. Use the Admin Dashboard (/admin/dashboard) to monitor dead letters and investigate failures.
+### Namespaces
 
----
+- default -> general queue
+- prod -> production workloads
+- heavy-tasks -> compute-heavy workloads
 
-## 🔒 Security Guidelines
-
-### ⚠️ Public Intent Warning
-Setting `visibility="public"` broadcasts your payload to the Open Fleet.
-* **NEVER** include passwords, tokens, or private PII.
-* **ALWAYS** assume the worker executing a public job is an untrusted third party.
-
-###  Worker Best Practices
-* **Defensive Parsing:** Always validate `payload` structure before processing.
-* **Non-Interactive:** Prefer whitelisting commands over executing raw strings.
-* **Isolation:** Treat all payloads as untrusted data, especially in Open Fleet mode.
-
-###  Request Integrity
-The SDK uses **HMAC-SHA256** signatures for all requests, providing:
-* **Authentication:** Verification of API key ownership.
-* **Integrity:** Protection against tampering of paths and payloads.
-* **Replay Protection:** Unique nonces and timestamps per request.
+Namespaces are enforced server-side as routing isolation domains.
 
 ---
 
-##  Raw HTTP Example (Protocol First)
+### Workers
 
-You don't need the SDK to use the Intent Protocol.
-```bash
-curl -X POST https://dsecurity.pythonanywhere.com/intent \
-  -H "X-API-KEY: your_key" \
-  -H "Content-Type: application/json" \
-  -d '{"goal":"test","payload":{"msg":"hello"}}'
+Workers:
+- claim jobs
+- execute handlers
+- report success/failure
+
+Identified by:
+- worker_id
+- capabilities
+
+---
+
+### Capabilities
+
+Example:
+
+```
+python,notify,gpu,ffmpeg
 ```
 
+Used to filter eligible workers.
+
 ---
 
-## ❗ Error Handling
+## Error Handling
+
+The SDK raises structured exceptions for predictable failure handling.
+
+### Exception Types
+
+| Exception | When it occurs |
+|----------|----------------|
+| `IntentBusAuthError` | Invalid API key, authentication failure |
+| `IntentBusRateLimitError` | Server rate limit exceeded (HTTP 429) |
+| `IntentBusError` | General SDK or server-side error |
+
+---
+
+### Example: Safe Error Handling
 
 ```python
-from intent_bus import (
+from intent_bus import IntentClient
+from intent_bus.exceptions import (
     IntentBusError,
     IntentBusAuthError,
     IntentBusRateLimitError
 )
 
+bus = IntentClient()
+
 try:
-    bus.publish("goal", {"data": 1})
+    result = bus.publish(
+        goal="notify",
+        payload={"message": "hello"}
+    )
 except IntentBusAuthError:
-    # Handle bad credentials or signature failure
+    print("Invalid API key")
 except IntentBusRateLimitError:
-    # Handle 429 Too Many Requests
+    print("Rate limited, retry later")
+except IntentBusError as e:
+    print(f"General SDK error: {e}")
 ```
 
 ---
 
-##  License
+## Reliability Model
 
-MIT License © 2026 Dsecurity
+| Property | Behavior |
+|----------|----------|
+| Delivery | At-least-once |
+| Retry | SDK + server retry support |
+| Claim | Atomic fetch |
+| Fulfill | Final state transition |
+| Idle | Retry-After backoff |
+
+Workers must be idempotent.
+
+---
+
+## Security Model
+
+- Payloads are untrusted input
+- Never expose secrets in intents
+- Public intents are broadcast to fleet
+- API key required for all mutations
+
+---
+
+## Safety Guarantees
+
+| Operation | Behavior |
+|----------|----------|
+| publish | Idempotent |
+| set | Idempotent KV store |
+| claim | Atomic |
+| fulfill | Final |
+| fail | Terminal |
+
+---
+
+## Failure Handling
+
+- Network failures retry where safe
+- claim is not retried automatically
+- server may return 204 + Retry-After
+- failed jobs may enter dead-letter state
+
+---
+
+## License
+
+MIT License © 2026 dsecurity49

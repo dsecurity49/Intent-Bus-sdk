@@ -7,7 +7,7 @@ import random
 import secrets
 import stat
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Callable
 from urllib.parse import quote
 
 import requests
@@ -17,6 +17,17 @@ from .version import __version__
 from .exceptions import IntentBusAuthError, IntentBusError, IntentBusRateLimitError
 
 logger = logging.getLogger(__name__)
+
+class ClaimResponse(dict):
+    """
+    Hybrid response object: Behaves exactly like a dictionary for legacy scripts,
+    but carries v7.5 protocol metadata (status_code, retry_after) as attributes.
+    """
+    def __init__(self, seq=None, status_code: int = 200, retry_after: Optional[int] = None, **kwargs):
+        super().__init__(seq or {}, **kwargs)
+        self.status_code = status_code
+        self.retry_after = retry_after
+
 
 class IntentClient:
     def __init__(
@@ -153,6 +164,7 @@ class IntentClient:
         retries: int = 0,
         idempotency_key: Optional[str] = None,
         retry_on_server_error: bool = False,
+        headers_override: Optional[Dict[str, str]] = None,
     ) -> requests.Response:
         path = self._build_path(endpoint, params)
         url = f"{self.base_url}{path}"
@@ -175,6 +187,9 @@ class IntentClient:
             }
             if idempotency_key:
                 headers["Idempotency-Key"] = idempotency_key
+                
+            if headers_override:
+                headers.update(headers_override)
 
             try:
                 res = self.session.request(
@@ -200,7 +215,14 @@ class IntentClient:
 
         raise IntentBusError(f"Request failed: {last_exc}")
 
-    def publish(self, goal: str, payload: Any, visibility: str = "private", idempotency_key: Optional[str] = None):
+    def publish(
+        self, 
+        goal: str, 
+        payload: Any, 
+        visibility: str = "private", 
+        idempotency_key: Optional[str] = None,
+        namespace: str = "default"
+    ) -> Optional[Dict[str, Any]]:
         if visibility not in ("private", "public"):
             raise IntentBusError("visibility must be 'private' or 'public'")
         if idempotency_key is None:
@@ -208,29 +230,52 @@ class IntentClient:
 
         res = self._request(
             "POST", "/intent",
-            json_data={"goal": goal, "payload": payload, "visibility": visibility},
+            json_data={"goal": goal, "payload": payload, "visibility": visibility, "namespace": namespace},
             retries=2,
             idempotency_key=idempotency_key,
             retry_on_server_error=True
         )
-        return res.json()
+        if res.status_code in (200, 201):
+            return res.json()
+        return None
 
-    def claim(self, goal: Optional[str] = None, publisher: Optional[str] = None):
-        params = {}
+    def claim(
+        self, 
+        goal: Optional[str] = None, 
+        publisher: Optional[str] = None,
+        namespace: str = "default",
+        worker_id: Optional[str] = None,
+        capabilities: Optional[str] = None
+    ) -> Optional[ClaimResponse]:
+        params = {"namespace": namespace}
         if goal: params["goal"] = goal
         if publisher: params["publisher"] = publisher
-        res = self._request("POST", "/claim", params=params, retries=0)
+        
+        headers = {}
+        if worker_id: headers["X-Worker-ID"] = worker_id
+        if capabilities: headers["X-Worker-Capabilities"] = capabilities
+        
+        res = self._request("POST", "/claim", params=params, headers_override=headers, retries=0)
+        
+        if res.status_code == 204:
+            retry_header = res.headers.get("Retry-After")
+            retry_time = int(retry_header) if retry_header and retry_header.isdigit() else None
+            return ClaimResponse({}, status_code=204, retry_after=retry_time)
+            
+        if res.status_code == 200:
+            return ClaimResponse(res.json(), status_code=200)
+            
+        return None
+
+    def fail(self, intent_id: str, error: str = "Worker failure") -> Optional[Dict[str, Any]]:
+        res = self._request("POST", f"/fail/{intent_id}", json_data={"error": error})
         return res.json() if res.status_code == 200 else None
 
-    def fail(self, intent_id: str, error: str = "Worker failure"):
-        res = self._request("POST", f"/fail/{intent_id}", json_data={"error": error})
-        return res.json()
+    def fulfill(self, intent_id: str, **kwargs) -> Optional[Dict[str, Any]]:
+        res = self._request("POST", f"/fulfill/{intent_id}", json_data=kwargs or None)
+        return res.json() if res.status_code == 200 else None
 
-    def fulfill(self, intent_id: str):
-        res = self._request("POST", f"/fulfill/{intent_id}")
-        return res.json()
-
-    def set(self, key: str, value: Any, ttl: int = 600, idempotency_key: Optional[str] = None):
+    def set(self, key: str, value: Any, ttl: int = 600, idempotency_key: Optional[str] = None) -> Optional[Dict[str, Any]]:
         if idempotency_key is None:
             idempotency_key = secrets.token_hex(16)
         res = self._request(
@@ -240,27 +285,54 @@ class IntentClient:
             idempotency_key=idempotency_key,
             retry_on_server_error=True
         )
-        return res.json()
+        return res.json() if res.status_code == 200 else None
 
-    def get(self, key: str):
+    def get(self, key: str) -> Any:
         res = self._request("GET", f"/get/{key}", retries=2, retry_on_server_error=True)
-        return res.json().get("value")
+        return res.json().get("value") if res.status_code == 200 else None
 
-    def listen(self, goal: str, handler, poll_interval: float = 5.0, publisher: Optional[str] = None):
-        print(f"[IntentBus] Listening for '{goal}'...")
+    def listen(
+        self, 
+        goal: str, 
+        handler: Callable, 
+        poll_interval: float = 5.0, 
+        publisher: Optional[str] = None,
+        namespace: str = "default",
+        worker_id: Optional[str] = None,
+        capabilities: Optional[str] = None
+    ):
+        print(f"[IntentBus] Listening for '{namespace}/{goal}'...")
         try:
             while True:
                 try:
-                    job = self.claim(goal=goal, publisher=publisher)
-                    if job:
-                        print(f"[IntentBus] Claimed {job['id']}")
-                        try:
-                            if handler(job["payload"]) is not False:
+                    job = self.claim(
+                        goal=goal, 
+                        publisher=publisher,
+                        namespace=namespace,
+                        worker_id=worker_id,
+                        capabilities=capabilities
+                    )
+                    
+                    # Triggers if job is None OR an empty dictionary (204 state)
+                    if not job:
+                        retry_after = getattr(job, "retry_after", None)
+                        sleep_time = retry_after if retry_after is not None else poll_interval
+                        time.sleep(sleep_time)
+                        continue
+
+                    print(f"[IntentBus] Claimed {job['id']}")
+                    try:
+                        result = handler(job.get("payload", {}))
+                        if result is not False:
+                            if isinstance(result, dict):
+                                self.fulfill(job["id"], **result)
+                            else:
                                 self.fulfill(job["id"])
-                                print(f"[IntentBus] Fulfilled {job['id']}")
-                        except Exception as e:
-                            print(f"[IntentBus] Handler error: {e}")
-                            self.fail(job["id"], str(e))
+                            print(f"[IntentBus] Fulfilled {job['id']}")
+                    except Exception as e:
+                        print(f"[IntentBus] Handler error: {e}")
+                        self.fail(job["id"], str(e))
+                        
                 except IntentBusAuthError as e:
                     print(f"[IntentBus] Auth Error: {e}")
                     break

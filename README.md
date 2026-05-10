@@ -55,14 +55,14 @@ Done. You now have a working distributed job pipeline.
 
 ## Versioning Model
 
-- **SDK Version:** `v1.3.0`
+- **SDK Version:** `v1.3.1`
 - **Protocol Version:** `Intent Protocol v7.5`
 
 The SDK evolves independently while maintaining compatibility with the stable protocol specification.
 
 ---
 
-## New in SDK v1.3.0 (Protocol v7.5 Support)
+## New in SDK v1.3.1 (Protocol v7.5 Support)
 
 - First-Class CLI – Run workers and publish intents directly from the terminal
 - Namespace Routing – Isolated execution domains for intents

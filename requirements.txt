@@ -1,1 +1,6 @@
-requests>=2.25.0
+# Install the SDK in editable mode to link the local intent_bus/ folder
+-e .
+
+# Development & Testing tools
+pytest>=7.0.0
+pytest-mock>=3.10.0

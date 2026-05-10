@@ -20,10 +20,10 @@ logger = logging.getLogger(__name__)
 
 class ClaimResponse(dict):
     """
-    Hybrid response object: Behaves exactly like a dictionary for legacy scripts,
-    but carries v7.5 protocol metadata (status_code, retry_after) as attributes.
+    Hybrid response object: Behaves like a dictionary for backward compatibility,
+    but carries v7.5 protocol metadata as attributes.
     """
-    def __init__(self, seq=None, status_code: int = 200, retry_after: Optional[int] = None, **kwargs):
+    def __init__(self, seq=None, status_code: int = 200, retry_after: Optional[float] = None, **kwargs):
         super().__init__(seq or {}, **kwargs)
         self.status_code = status_code
         self.retry_after = retry_after
@@ -65,8 +65,6 @@ class IntentClient:
             raise IntentBusAuthError("Empty API key.")
 
         self.api_key = key
-
-        # Connection pooling for high-throughput concurrency
         self.session = requests.Session()
         adapter = HTTPAdapter(pool_connections=10, pool_maxsize=10)
         self.session.mount("http://", adapter)
@@ -79,61 +77,35 @@ class IntentClient:
         self.close()
 
     def close(self):
-        """Explicitly close the underlying requests session."""
         self.session.close()
 
     def _build_path(self, endpoint: str, params: Optional[Dict[str, Any]]) -> str:
         if not params:
             return endpoint
-
         filtered = [(k, v) for k, v in params.items() if v is not None]
         if not filtered:
             return endpoint
-
-        # RFC 3986 encoding with lexicographic key ordering for HMAC determinism
         encoded_parts = []
         for k, v in sorted(filtered, key=lambda item: item[0]):
-            encoded_parts.append(
-                f"{quote(str(k), safe='')}={quote(str(v), safe='')}"
-            )
-
+            encoded_parts.append(f"{quote(str(k), safe='')}={quote(str(v), safe='')}")
         return f"{endpoint}?{'&'.join(encoded_parts)}"
 
     def _canonical_body(self, json_data: Optional[Dict[str, Any]]) -> bytes:
         if json_data is None:
             return b""
-        try:
-            return json.dumps(
-                json_data,
-                sort_keys=True,
-                separators=(",", ":"),
-                ensure_ascii=False,
-            ).encode("utf-8")
-        except TypeError as e:
-            raise IntentBusError(f"Payload serialization failed: {e}") from e
+        return json.dumps(
+            json_data, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        ).encode("utf-8")
 
-    def _generate_signature(
-        self,
-        method: str,
-        path: str,
-        ts: str,
-        nonce: str,
-        body_bytes: bytes,
-    ) -> str:
-        msg = b"\n".join(
-            [
-                method.upper().encode("utf-8"),
-                path.encode("utf-8"),
-                ts.encode("utf-8"),
-                nonce.encode("utf-8"),
-                body_bytes,
-            ]
-        )
-        return hmac.new(
-            self.api_key.encode("utf-8"),
-            msg,
-            hashlib.sha256,
-        ).hexdigest()
+    def _generate_signature(self, method: str, path: str, ts: str, nonce: str, body_bytes: bytes) -> str:
+        msg = b"\n".join([
+            method.upper().encode("utf-8"),
+            path.encode("utf-8"),
+            ts.encode("utf-8"),
+            nonce.encode("utf-8"),
+            body_bytes,
+        ])
+        return hmac.new(self.api_key.encode("utf-8"), msg, hashlib.sha256).hexdigest()
 
     def _error_message(self, res: requests.Response) -> str:
         try:
@@ -156,21 +128,15 @@ class IntentClient:
         return res
 
     def _request(
-        self,
-        method: str,
-        endpoint: str,
-        params: Optional[Dict[str, Any]] = None,
-        json_data: Optional[Dict[str, Any]] = None,
-        retries: int = 0,
-        idempotency_key: Optional[str] = None,
-        retry_on_server_error: bool = False,
+        self, method: str, endpoint: str, params: Optional[Dict[str, Any]] = None,
+        json_data: Optional[Dict[str, Any]] = None, retries: int = 0,
+        idempotency_key: Optional[str] = None, retry_on_server_error: bool = False,
         headers_override: Optional[Dict[str, str]] = None,
     ) -> requests.Response:
         path = self._build_path(endpoint, params)
         url = f"{self.base_url}{path}"
         body_bytes = self._canonical_body(json_data)
-
-        last_exc: Optional[Exception] = None
+        last_exc = None
 
         for attempt in range(retries + 1):
             ts = str(int(time.time()))
@@ -178,79 +144,42 @@ class IntentClient:
             sig = self._generate_signature(method, path, ts, nonce, body_bytes)
 
             headers = {
-                "X-API-KEY": self.api_key,
-                "X-Timestamp": ts,
-                "X-Nonce": nonce,
-                "X-Signature": sig,
-                "Content-Type": "application/json",
-                "User-Agent": self.user_agent,
+                "X-API-KEY": self.api_key, "X-Timestamp": ts, "X-Nonce": nonce,
+                "X-Signature": sig, "Content-Type": "application/json", "User-Agent": self.user_agent,
             }
-            if idempotency_key:
-                headers["Idempotency-Key"] = idempotency_key
-                
-            if headers_override:
-                headers.update(headers_override)
+            if idempotency_key: headers["Idempotency-Key"] = idempotency_key
+            if headers_override: headers.update(headers_override)
 
             try:
                 res = self.session.request(
-                    method=method.upper(),
-                    url=url,
-                    headers=headers,
-                    data=body_bytes if body_bytes else None,
-                    timeout=self.timeout,
+                    method=method.upper(), url=url, headers=headers,
+                    data=body_bytes if body_bytes else None, timeout=self.timeout,
                 )
-
                 if retry_on_server_error and res.status_code in (500, 502, 503, 504):
                     if attempt < retries:
                         time.sleep((2**attempt) + random.uniform(0.0, 0.5))
                         continue
-
                 return self._handle_response(res)
-
             except requests.RequestException as e:
                 last_exc = e
-                if attempt >= retries:
-                    raise IntentBusError(f"Network error: {e}") from e
+                if attempt >= retries: raise IntentBusError(f"Network error: {e}")
                 time.sleep((2**attempt) + random.uniform(0.0, 0.5))
-
         raise IntentBusError(f"Request failed: {last_exc}")
 
-    def publish(
-        self, 
-        goal: str, 
-        payload: Any, 
-        visibility: str = "private", 
-        idempotency_key: Optional[str] = None,
-        namespace: str = "default"
-    ) -> Optional[Dict[str, Any]]:
-        if visibility not in ("private", "public"):
-            raise IntentBusError("visibility must be 'private' or 'public'")
-        if idempotency_key is None:
-            idempotency_key = secrets.token_hex(16)
-
+    def publish(self, goal: str, payload: Any, visibility: str = "private", idempotency_key: Optional[str] = None, namespace: str = "default"):
+        if visibility not in ("private", "public"): raise IntentBusError("visibility must be 'private' or 'public'")
+        if idempotency_key is None: idempotency_key = secrets.token_hex(16)
         res = self._request(
             "POST", "/intent",
             json_data={"goal": goal, "payload": payload, "visibility": visibility, "namespace": namespace},
-            retries=2,
-            idempotency_key=idempotency_key,
-            retry_on_server_error=True
+            retries=2, idempotency_key=idempotency_key, retry_on_server_error=True
         )
-        if res.status_code in (200, 201):
-            return res.json()
-        return None
+        return res.json() if res.status_code in (200, 201) else None
 
-    def claim(
-        self, 
-        goal: Optional[str] = None, 
-        publisher: Optional[str] = None,
-        namespace: str = "default",
-        worker_id: Optional[str] = None,
-        capabilities: Optional[str] = None
-    ) -> Optional[ClaimResponse]:
+    def claim(self, goal: Optional[str] = None, publisher: Optional[str] = None, namespace: str = "default", worker_id: Optional[str] = None, capabilities: Optional[str] = None) -> Optional[ClaimResponse]:
         params = {"namespace": namespace}
         if goal: params["goal"] = goal
         if publisher: params["publisher"] = publisher
-        
         headers = {}
         if worker_id: headers["X-Worker-ID"] = worker_id
         if capabilities: headers["X-Worker-Capabilities"] = capabilities
@@ -258,88 +187,46 @@ class IntentClient:
         res = self._request("POST", "/claim", params=params, headers_override=headers, retries=0)
         
         if res.status_code == 204:
-            retry_header = res.headers.get("Retry-After")
-            retry_time = int(retry_header) if retry_header and retry_header.isdigit() else None
-            return ClaimResponse({}, status_code=204, retry_after=retry_time)
+            rh = res.headers.get("Retry-After")
+            rt = int(rh) if rh and rh.isdigit() else None
+            return ClaimResponse({}, status_code=204, retry_after=rt)
             
         if res.status_code == 200:
-            return ClaimResponse(res.json(), status_code=200)
-            
+            data = res.json()
+            if not data or "id" not in data:
+                return ClaimResponse({}, status_code=204)
+            return ClaimResponse(data, status_code=200)
         return None
 
-    def fail(self, intent_id: str, error: str = "Worker failure") -> Optional[Dict[str, Any]]:
+    def fail(self, intent_id: str, error: str = "Worker failure"):
         res = self._request("POST", f"/fail/{intent_id}", json_data={"error": error})
         return res.json() if res.status_code == 200 else None
 
-    def fulfill(self, intent_id: str, **kwargs) -> Optional[Dict[str, Any]]:
+    def fulfill(self, intent_id: str, **kwargs):
         res = self._request("POST", f"/fulfill/{intent_id}", json_data=kwargs or None)
         return res.json() if res.status_code == 200 else None
 
-    def set(self, key: str, value: Any, ttl: int = 600, idempotency_key: Optional[str] = None) -> Optional[Dict[str, Any]]:
-        if idempotency_key is None:
-            idempotency_key = secrets.token_hex(16)
-        res = self._request(
-            "POST", f"/set/{key}",
-            json_data={"value": value, "ttl": ttl},
-            retries=2,
-            idempotency_key=idempotency_key,
-            retry_on_server_error=True
-        )
+    def set(self, key: str, value: Any, ttl: int = 600, idempotency_key: Optional[str] = None):
+        if idempotency_key is None: idempotency_key = secrets.token_hex(16)
+        res = self._request("POST", f"/set/{key}", json_data={"value": value, "ttl": ttl}, retries=2, idempotency_key=idempotency_key, retry_on_server_error=True)
         return res.json() if res.status_code == 200 else None
 
-    def get(self, key: str) -> Any:
+    def get(self, key: str):
         res = self._request("GET", f"/get/{key}", retries=2, retry_on_server_error=True)
         return res.json().get("value") if res.status_code == 200 else None
 
-    def listen(
-        self, 
-        goal: str, 
-        handler: Callable, 
-        poll_interval: float = 5.0, 
-        publisher: Optional[str] = None,
-        namespace: str = "default",
-        worker_id: Optional[str] = None,
-        capabilities: Optional[str] = None
-    ):
-        print(f"[IntentBus] Listening for '{namespace}/{goal}'...")
+    def listen(self, goal: str, handler: Callable, poll_interval: float = 5.0, publisher: Optional[str] = None, namespace: str = "default", worker_id: Optional[str] = None, capabilities: Optional[str] = None):
         try:
             while True:
+                job = self.claim(goal=goal, publisher=publisher, namespace=namespace, worker_id=worker_id, capabilities=capabilities)
+                if not job or job.status_code == 204:
+                    time.sleep(job.retry_after if job and job.retry_after else poll_interval)
+                    continue
                 try:
-                    job = self.claim(
-                        goal=goal, 
-                        publisher=publisher,
-                        namespace=namespace,
-                        worker_id=worker_id,
-                        capabilities=capabilities
-                    )
-                    
-                    # Triggers if job is None OR an empty dictionary (204 state)
-                    if not job:
-                        retry_after = getattr(job, "retry_after", None)
-                        sleep_time = retry_after if retry_after is not None else poll_interval
-                        time.sleep(sleep_time)
-                        continue
-
-                    print(f"[IntentBus] Claimed {job['id']}")
-                    try:
-                        result = handler(job.get("payload", {}))
-                        if result is not False:
-                            if isinstance(result, dict):
-                                self.fulfill(job["id"], **result)
-                            else:
-                                self.fulfill(job["id"])
-                            print(f"[IntentBus] Fulfilled {job['id']}")
-                    except Exception as e:
-                        print(f"[IntentBus] Handler error: {e}")
-                        self.fail(job["id"], str(e))
-                        
-                except IntentBusAuthError as e:
-                    print(f"[IntentBus] Auth Error: {e}")
-                    break
-                except IntentBusRateLimitError:
-                    time.sleep(30)
+                    result = handler(job.get("payload", {}))
+                    if result is not False:
+                        self.fulfill(job["id"], **(result if isinstance(result, dict) else {}))
                 except Exception as e:
-                    print(f"[IntentBus] Error: {e}")
-                time.sleep(poll_interval + random.uniform(0.0, 1.0))
-        except KeyboardInterrupt:
-            print("[IntentBus] Shutdown requested")
+                    self.fail(job["id"], str(e))
+                time.sleep(0.5)
+        except KeyboardInterrupt: pass

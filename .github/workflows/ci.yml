@@ -36,7 +36,7 @@ jobs:
         run: intent-bus --help
 
       - name: Import smoke test
-        run: python -c "import intent_bus; print('SDK Import: OK')"
+        run: python -c "import intent_bus; print('SDK Import OK')"
 
       - name: Run pytest
         env:

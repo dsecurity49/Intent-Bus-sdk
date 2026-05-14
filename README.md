@@ -31,7 +31,7 @@ The SDK now actively blocks Python `NaN` and `Infinity` values from being serial
 
 ---
 
-## What's New in SDK v2.0.0?
+## What's New in SDK v2.0.3?
 
 The V2.0 architecture has been rewritten for production stability:
 * **Resilient Transport:** Built-in connection pooling and full-jitter retry backoff.

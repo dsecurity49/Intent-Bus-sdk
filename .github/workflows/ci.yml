@@ -1,4 +1,4 @@
-name: CI
+name: Intent Bus CI
 
 on:
   push:
@@ -23,32 +23,27 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-          cache: 'pip' # Speeds up subsequent runs by caching requests/pytest
+          cache: 'pip' # Speeds up subsequent runs by caching dependencies
 
       - name: Upgrade pip
         run: python -m pip install --upgrade pip
 
-      # This is the "Gold Standard" install for PEP 660/pyproject.toml
       - name: Install SDK with dev dependencies
         run: pip install -e ".[dev]"
 
-      # Verifies the 'intent-bus' CLI entry point is correctly mapped
       - name: CLI smoke test
         run: intent-bus --help
 
-      # Ensures the package is importable and metadata is valid
       - name: Import smoke test
         run: python -c "import intent_bus; print('SDK Import: OK')"
 
-      # Run full test suite (falls back to compileall if no tests/ folder exists)
       - name: Run pytest
         run: |
           if [ -d tests ]; then
-            pytest -q
+            pytest tests/ -v
           else
             echo "No tests directory found, skipping pytest."
           fi
 
-      # Final syntax validation
       - name: Syntax check
         run: python -m compileall intent_bus/

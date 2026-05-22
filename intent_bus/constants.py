@@ -11,8 +11,8 @@ RESULT_TEXT = 'text'
 DEFAULT_POLL_INTERVAL = 5.0
 MAX_POLL_BACKOFF = 60.0
 
-# SDK / Protocol matching
-SERVER_API_VERSION = '7.5'
+# SDK / Protocol matching updated for Claim Ownership Isolation (v2.1 Semantics)
+SERVER_API_VERSION = '7.61'
 SDK_VERSION_HEADER = 'X-Intent-Version'
 
 # Transport limits

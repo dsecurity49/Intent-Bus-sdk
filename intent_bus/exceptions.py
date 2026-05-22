@@ -17,3 +17,7 @@ class IntentBusRateLimitError(IntentBusError):
 class IntentBusNetworkError(IntentBusError):
     '''Raised when requests timeout or connections are dropped after all retries.'''
     pass
+
+class IntentBusLeaseLostError(IntentBusError):
+    '''Raised when a job lease is invalidated, missing, or expired (HTTP 404).'''
+    pass

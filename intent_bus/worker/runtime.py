@@ -173,42 +173,22 @@ class WorkerRuntime:
                             )
 
                         else:
-                            safe_kwargs = {}
-
+                            # Determine fulfillment payload
                             if result is None:
-                                pass
-
-                            elif (
-                                isinstance(result, dict)
-                                and (
-                                    'result' in result
-                                    or 'result_type' in result
-                                )
+                                safe_kwargs = {}
+                            elif isinstance(result, dict) and (
+                                'result' in result or 'result_type' in result
                             ):
-                                allowed = {
-                                    'result',
-                                    'result_type',
-                                }
-
                                 safe_kwargs = {
-                                    k: v
-                                    for k, v in result.items()
-                                    if k in allowed
+                                    k: v for k, v in result.items()
+                                    if k in {'result', 'result_type'}
                                 }
-
-                                if (
-                                    'result_type' in safe_kwargs
-                                    and 'result' not in safe_kwargs
-                                ):
+                                if 'result_type' in safe_kwargs and 'result' not in safe_kwargs:
                                     raise ValueError(
-                                        "Handler returned 'result_type' "
-                                        "without a 'result'"
+                                        "Handler returned 'result_type' without a 'result'"
                                     )
-
                             else:
-                                safe_kwargs = {
-                                    'result': result,
-                                }
+                                safe_kwargs = {'result': result}
 
                             self._execute_with_retry(
                                 'fulfill',

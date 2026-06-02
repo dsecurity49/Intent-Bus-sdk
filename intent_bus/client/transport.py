@@ -207,8 +207,16 @@ class IntentTransport:
                 ):
                     if attempt < retries:
                         retry_after = res.headers.get('Retry-After')
-                        if retry_after and retry_after.isdigit():
-                            time.sleep(int(retry_after))
+                        if retry_after:
+                            try:
+                                time.sleep(float(retry_after))
+                            except (ValueError, TypeError):
+                                time.sleep(
+                                    random.uniform(
+                                        0,
+                                        min(60, 2 ** (attempt + 1)),
+                                    )
+                                )
                         else:
                             time.sleep(
                                 random.uniform(

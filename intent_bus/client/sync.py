@@ -522,17 +522,10 @@ class IntentClient:
 
         val = res.json().get('value')
 
-        if (
-            isinstance(val, str)
-            and (
-                val.startswith('{')
-                or val.startswith('[')
-            )
-        ):
+        if isinstance(val, str):
             try:
                 return json.loads(val)
-
-            except json.JSONDecodeError:
+            except (json.JSONDecodeError, TypeError):
                 pass
 
         return val

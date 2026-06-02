@@ -200,9 +200,10 @@ class WorkerRuntime:
                             )
 
                     except ValueError as handler_exc:
+                        err_msg = str(handler_exc)
                         logger.error(
                             'Handler returned invalid protocol shape: %s',
-                            handler_exc,
+                            err_msg,
                         )
 
                         self._execute_with_retry(
@@ -210,11 +211,12 @@ class WorkerRuntime:
                             lambda: self.client.fail(
                                 intent_id=job_id,
                                 claim_token=claim_token,
-                                error=str(handler_exc),
+                                error=err_msg,
                             ),
                         )
 
                     except Exception as handler_exc:
+                        err_msg = str(handler_exc)
                         logger.exception('Worker handler crashed')
 
                         self._execute_with_retry(
@@ -222,7 +224,7 @@ class WorkerRuntime:
                             lambda: self.client.fail(
                                 intent_id=job_id,
                                 claim_token=claim_token,
-                                error=str(handler_exc),
+                                error=err_msg,
                             ),
                         )
 

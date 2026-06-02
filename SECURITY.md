@@ -5,7 +5,7 @@
 | Component | Version | Status |
 |---|---|---|
 | Intent Bus Server | v7.61+ | ✅ Supported |
-| Python SDK (`intent-bus`) | v2.1.1+ | ✅ Supported |
+| Python SDK (`intent-bus`) | v2.1.2+ | ✅ Supported |
 
 ---
 

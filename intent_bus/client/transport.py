@@ -1,9 +1,11 @@
 '''HTTP Transport and retry logic.'''
 
+import email.utils
 import logging
 import random
 import secrets
 import time
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Sequence, Tuple, Union
 from urllib.parse import quote
 
@@ -208,9 +210,24 @@ class IntentTransport:
                     if attempt < retries:
                         retry_after = res.headers.get('Retry-After')
                         if retry_after:
+                            delay = None
+                            # Try parsing as delta-seconds first
                             try:
-                                time.sleep(float(retry_after))
+                                delay = float(retry_after)
+                                if delay < 0:
+                                    delay = None
                             except (ValueError, TypeError):
+                                # Try parsing as HTTP-date (RFC 9110)
+                                try:
+                                    http_date = email.utils.parsedate_to_datetime(retry_after)
+                                    now = datetime.now(timezone.utc)
+                                    delay = max(0, (http_date - now).total_seconds())
+                                except (TypeError, ValueError):
+                                    delay = None
+
+                            if delay is not None:
+                                time.sleep(delay)
+                            else:
                                 time.sleep(
                                     random.uniform(
                                         0,

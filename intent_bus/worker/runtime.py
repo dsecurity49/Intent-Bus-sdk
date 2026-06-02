@@ -179,14 +179,20 @@ class WorkerRuntime:
                             elif isinstance(result, dict) and (
                                 'result' in result or 'result_type' in result
                             ):
-                                safe_kwargs = {
-                                    k: v for k, v in result.items()
-                                    if k in {'result', 'result_type'}
-                                }
-                                if 'result_type' in safe_kwargs and 'result' not in safe_kwargs:
-                                    raise ValueError(
-                                        "Handler returned 'result_type' without a 'result'"
-                                    )
+                                # Only treat as control envelope if keys are strictly limited
+                                # to envelope keys (result, result_type)
+                                if set(result.keys()).issubset({'result', 'result_type'}):
+                                    safe_kwargs = {
+                                        k: v for k, v in result.items()
+                                        if k in {'result', 'result_type'}
+                                    }
+                                    if 'result_type' in safe_kwargs and 'result' not in safe_kwargs:
+                                        raise ValueError(
+                                            "Handler returned 'result_type' without a 'result'"
+                                        )
+                                else:
+                                    # Dict has other keys, preserve as normal payload
+                                    safe_kwargs = {'result': result}
                             else:
                                 safe_kwargs = {'result': result}
 

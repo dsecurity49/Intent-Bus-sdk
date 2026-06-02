@@ -2,7 +2,7 @@
 
 [![PyPI version](https://badge.fury.io/py/intent-bus.svg)](https://badge.fury.io/py/intent-bus) [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-The official Python SDK for **Intent Bus**, a lightweight distributed job bus implementing the **Intent Protocol v2.0**. 
+The official Python SDK for **Intent Bus**, a lightweight distributed job bus implementing the **Intent Protocol v2.1**. 
 
 Intent Bus is designed for environments where network reliability is not guaranteed. It features a decentralized worker architecture, strict namespace isolation, optional shared KV state, resilient HTTP transports, and strict data contracts.
 
@@ -31,9 +31,9 @@ The SDK now actively blocks Python `NaN` and `Infinity` values from being serial
 
 ---
 
-## What's New in SDK v2.0.4?
+## What's New in SDK v2.1.2?
 
-The V2.0 architecture has been rewritten for production stability:
+The V2.1 architecture has been rewritten for production stability:
 * **Resilient Transport:** Built-in connection pooling and full-jitter retry backoff.
 * **Strict Immutable Models:** Payloads are parsed into frozen dataclasses (`ClaimedIntent`, `IntentStatus`, `IntentResult`) to prevent silent protocol drift.
 * **Worker Orchestration:** The new `WorkerRuntime` class handles queue draining, server-directed backoffs, and error isolation.
@@ -194,7 +194,7 @@ intent-bus publish send_email '{"to": "user@ext.com"}' -n comms --public
 The SDK raises structured exceptions for predictable failure handling. Transport timeouts and connection drops are gracefully handled internally by full-jitter backoff algorithms, but persistent failures will surface to your code.
 
 | Exception | Cause |
-|----------|----------------|
+|----------|-------------------------------------------------------------------|
 | `IntentBusAuthError` | Invalid API key or signature verification failure. |
 | `IntentBusRateLimitError` | Server rate limit exceeded (HTTP 429). |
 | `IntentBusNetworkError` | Timeouts, DNS failures, connection drops after all retries exhaust. |

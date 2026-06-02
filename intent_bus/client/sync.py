@@ -1,7 +1,9 @@
 '''Synchronous HTTP Client for the Intent Protocol.'''
 
+import email.utils
 import json
 import secrets
+from datetime import datetime, timezone
 from typing import Any, Dict, Generic, Optional, Sequence, TypeVar, Union
 
 from ..constants import (
@@ -274,6 +276,7 @@ class IntentClient:
             rh = res.headers.get('Retry-After')
 
             if rh:
+                # Try parsing as delta-seconds first
                 try:
                     retry_after = float(rh.strip())
 
@@ -281,7 +284,13 @@ class IntentClient:
                         retry_after = None
 
                 except (TypeError, ValueError):
-                    retry_after = None
+                    # Try parsing as HTTP-date (RFC 9110)
+                    try:
+                        http_date = email.utils.parsedate_to_datetime(rh)
+                        now = datetime.now(timezone.utc)
+                        retry_after = max(0, (http_date - now).total_seconds())
+                    except (TypeError, ValueError):
+                        retry_after = None
 
             return ClaimResponse(
                 None,
@@ -522,17 +531,15 @@ class IntentClient:
 
         val = res.json().get('value')
 
-        if (
-            isinstance(val, str)
-            and (
-                val.startswith('{')
-                or val.startswith('[')
-            )
-        ):
-            try:
-                return json.loads(val)
-
-            except json.JSONDecodeError:
-                pass
+        if isinstance(val, str):
+            # Only attempt JSON decode for strings that were likely encoded
+            # (i.e., strings starting with '{' or '[' which indicate dict/list)
+            # This preserves plain scalar strings like "false", "null", "123"
+            stripped = val.strip()
+            if stripped and stripped[0] in ('{', '['):
+                try:
+                    return json.loads(val)
+                except (json.JSONDecodeError, TypeError):
+                    pass
 
         return val

@@ -134,6 +134,29 @@ def test_claim_204_no_content(client):
         assert result.retry_after == 15.0
 
 
+def test_claim_204_retry_after_http_date(client):
+    """Test that claim() correctly parses Retry-After as HTTP-date per RFC 9110."""
+    from datetime import datetime, timedelta, timezone
+    import email.utils
+
+    # Create a datetime 30 seconds in the future
+    future_time = datetime.now(timezone.utc) + timedelta(seconds=30)
+    http_date_str = email.utils.format_datetime(future_time, usegmt=True)
+
+    mock_res = MagicMock()
+    mock_res.status_code = 204
+    mock_res.headers = {"Retry-After": http_date_str}
+
+    with patch("requests.Session.request", return_value=mock_res):
+        result = client.claim(goal="test_goal")
+
+        assert not result
+        assert result.status_code == 204
+        # Should be approximately 30 seconds (allow small variance for processing time)
+        assert result.retry_after is not None
+        assert 28 <= result.retry_after <= 32
+
+
 def test_claim_routing_headers(client):
     """Ensure worker-id and capabilities are passed in headers."""
     mock_res = MagicMock()
@@ -266,6 +289,40 @@ def test_network_retry(mock_sleep, client):
         assert mock_req.call_count == 3
         # Should have slept twice for the 2 retries
         assert mock_sleep.call_count == 2
+
+
+@patch("time.sleep")
+def test_server_error_retry_with_http_date_retry_after(mock_sleep, client):
+    """Test that server error retry logic correctly parses Retry-After as HTTP-date."""
+    from datetime import datetime, timedelta, timezone
+    import email.utils
+
+    # Create a datetime 10 seconds in the future
+    future_time = datetime.now(timezone.utc) + timedelta(seconds=10)
+    http_date_str = email.utils.format_datetime(future_time, usegmt=True)
+
+    # First attempt returns 503 with HTTP-date Retry-After, second attempt succeeds
+    mock_res_503 = MagicMock()
+    mock_res_503.status_code = 503
+    mock_res_503.headers = {"Retry-After": http_date_str}
+
+    mock_res_200 = MagicMock()
+    mock_res_200.status_code = 200
+    mock_res_200.json.return_value = {"id": "abc123", "status": "published"}
+    mock_res_200.headers = {}
+
+    with patch("requests.Session.request", side_effect=[mock_res_503, mock_res_200]) as mock_req:
+        result = client.publish("test_goal", {"key": "value"})
+
+        # Verify retry happened
+        assert mock_req.call_count == 2
+        assert result.id == "abc123"
+
+        # Verify sleep was called with the computed delay (approximately 10 seconds)
+        assert mock_sleep.call_count == 1
+        sleep_duration = mock_sleep.call_args[0][0]
+        # Allow for small variance due to processing time
+        assert 8 <= sleep_duration <= 12
 
 
 # =================================================================

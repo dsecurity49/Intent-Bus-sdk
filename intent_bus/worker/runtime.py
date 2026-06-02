@@ -173,42 +173,28 @@ class WorkerRuntime:
                             )
 
                         else:
-                            safe_kwargs = {}
-
+                            # Determine fulfillment payload
                             if result is None:
-                                pass
-
-                            elif (
-                                isinstance(result, dict)
-                                and (
-                                    'result' in result
-                                    or 'result_type' in result
-                                )
+                                safe_kwargs = {}
+                            elif isinstance(result, dict) and (
+                                'result' in result or 'result_type' in result
                             ):
-                                allowed = {
-                                    'result',
-                                    'result_type',
-                                }
-
-                                safe_kwargs = {
-                                    k: v
-                                    for k, v in result.items()
-                                    if k in allowed
-                                }
-
-                                if (
-                                    'result_type' in safe_kwargs
-                                    and 'result' not in safe_kwargs
-                                ):
-                                    raise ValueError(
-                                        "Handler returned 'result_type' "
-                                        "without a 'result'"
-                                    )
-
+                                # Only treat as control envelope if keys are strictly limited
+                                # to envelope keys (result, result_type)
+                                if set(result.keys()).issubset({'result', 'result_type'}):
+                                    safe_kwargs = {
+                                        k: v for k, v in result.items()
+                                        if k in {'result', 'result_type'}
+                                    }
+                                    if 'result_type' in safe_kwargs and 'result' not in safe_kwargs:
+                                        raise ValueError(
+                                            "Handler returned 'result_type' without a 'result'"
+                                        )
+                                else:
+                                    # Dict has other keys, preserve as normal payload
+                                    safe_kwargs = {'result': result}
                             else:
-                                safe_kwargs = {
-                                    'result': result,
-                                }
+                                safe_kwargs = {'result': result}
 
                             self._execute_with_retry(
                                 'fulfill',
@@ -220,9 +206,10 @@ class WorkerRuntime:
                             )
 
                     except ValueError as handler_exc:
+                        err_msg = str(handler_exc)
                         logger.error(
                             'Handler returned invalid protocol shape: %s',
-                            handler_exc,
+                            err_msg,
                         )
 
                         self._execute_with_retry(
@@ -230,11 +217,12 @@ class WorkerRuntime:
                             lambda: self.client.fail(
                                 intent_id=job_id,
                                 claim_token=claim_token,
-                                error=str(handler_exc),
+                                error=err_msg,
                             ),
                         )
 
                     except Exception as handler_exc:
+                        err_msg = str(handler_exc)
                         logger.exception('Worker handler crashed')
 
                         self._execute_with_retry(
@@ -242,7 +230,7 @@ class WorkerRuntime:
                             lambda: self.client.fail(
                                 intent_id=job_id,
                                 claim_token=claim_token,
-                                error=str(handler_exc),
+                                error=err_msg,
                             ),
                         )
 
